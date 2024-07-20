@@ -643,7 +643,7 @@ def play_model(path, checkpoint='last',environment='default',seed=None, header=N
           break
   video_path = os.path.join(path, filename)
   print('Reward for the run: ', score)
-  return display_video(frames,video_path)
+  return display_video(frames,video_path.replace('.mp4',f'_score-{score:.2f}.mp4'))
 
 """Let's visualize the agent with a pretrained MLP model. Once you have your pretrained model, you can replace the experiment path to visualize the agent with your model.
 
