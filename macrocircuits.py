@@ -1501,12 +1501,13 @@ for mod_ in ['ncap','mlp']:
   for opt in ['ppo']:
     for v in viscosities:
       vlabel=str(v).replace('.','d')
-      name = f'model-{mod_}_opt-{opt}_v-{vlabel}'
       steps='int(5e5)' # shouldnt these be the same for both models
       save_steps='int(5e4)'
       trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
+      newname=f'model-{mod_}_opt-{opt}_v-{vlabel}_retrain-{ref_vlabel}'
+      name = f'model-{mod_}_opt-{opt}_v-{ref_vlabel}'
       checkpointpath = os.path.join('data', 'local', 'experiments', 'tonic', name)
-      newname=f'model-{mod_}_opt-{opt}_v-{ref_vlabel}_retrain'
+
       if 'mlp' in mod_ and 'ppo' in opt:
         
         train('import tonic.torch',
@@ -1527,4 +1528,4 @@ for mod_ in ['ncap','mlp']:
           trainer=trainer,
           checkpoint=checkpointpath,
           )
-        play_model(f'data/local/experiments/tonic/swimmer-swim/{name}',filename=f'video.mp4')
+        play_model(f'data/local/experiments/tonic/swimmer-swim/{newname}',filename=f'video.mp4')
