@@ -151,88 +151,6 @@ def swim(
     **environment_kwargs,
   )
 
-def get_model_str(n_links=6):
-  return swimmer.get_model_and_assets(n_links)[0]
-
-type(get_model_str(6))
-s2=str(get_model_str(6),encoding='utf-8').replace('density="3000"', 'density="3000" viscosity="1e-3"')
-s2=bytes(s2,encoding='utf-8')
-
-@swimmer.SUITE.add()
-def swim2(
-  n_links=6,
-  desired_speed=_SWIM_SPEED,
-  time_limit=swimmer._DEFAULT_TIME_LIMIT,
-  random=None,
-  environment_kwargs={},
-  model_string_=s2#template_world.replace('%options%', 'timestep="0.002" density="3000" viscosity="1e-3"'),
-):
-  """Returns the Swim task for a n-link swimmer."""
-  model_string, assets = swimmer.get_model_and_assets(n_links)
-  if model_string_:
-    model_string = model_string_
-  physics = swimmer.Physics.from_xml_string(model_string, assets=assets)
-  task = Swim(desired_speed=desired_speed, random=random)
-  return control.Environment(
-    physics,
-    task,
-    time_limit=time_limit,
-    control_timestep=swimmer._CONTROL_TIMESTEP,
-    **environment_kwargs,
-  )
-
-
-type(get_model_str(6))
-s2=str(get_model_str(6),encoding='utf-8').replace('density="3000"', 'density="3000" viscosity="1e-1"') #0.1
-s2=bytes(s2,encoding='utf-8')
-
-
-@swimmer.SUITE.add()
-def swim3(
-  n_links=6,
-  desired_speed=_SWIM_SPEED,
-  time_limit=swimmer._DEFAULT_TIME_LIMIT,
-  random=None,
-  environment_kwargs={},
-  model_string_=s2#template_world.replace('%options%', 'timestep="0.002" density="3000" viscosity="1e-3"'),
-):
-  """Returns the Swim task for a n-link swimmer."""
-  model_string, assets = swimmer.get_model_and_assets(n_links)
-  if model_string_:
-    model_string = model_string_
-  physics = swimmer.Physics.from_xml_string(model_string, assets=assets)
-  task = Swim(desired_speed=desired_speed, random=random)
-  return control.Environment(
-    physics,
-    task,
-    time_limit=time_limit,
-    control_timestep=swimmer._CONTROL_TIMESTEP,
-    **environment_kwargs,
-  )
-
-@swimmer.SUITE.add()
-def swim4(
-  n_links=5,
-  desired_speed=_SWIM_SPEED,
-  time_limit=swimmer._DEFAULT_TIME_LIMIT,
-  random=None,
-  environment_kwargs={},
-  model_string_=str(get_model_str(5),encoding='utf-8').replace('density="3000"', 'density="3000" viscosity="1e-1"'),
-):
-  """Returns the Swim task for a n-link swimmer."""
-  model_string, assets = swimmer.get_model_and_assets(n_links)
-  if model_string_:
-    model_string = model_string_
-  physics = swimmer.Physics.from_xml_string(model_string, assets=assets)
-  task = Swim(desired_speed=desired_speed, random=random)
-  return control.Environment(
-    physics,
-    task,
-    time_limit=time_limit,
-    control_timestep=swimmer._CONTROL_TIMESTEP,
-    **environment_kwargs,
-  )
-
 
 class Swim(swimmer.Swimmer):
   """Task to swim forwards at the desired speed."""
@@ -415,7 +333,9 @@ def train(
   after_training = None,
   parallel = 1,
   sequential = 1,
-  seed = 0
+  seed = 0,
+  checkpoint = 'none',
+
 ):
   """
   Some additional parameters:
@@ -439,12 +359,57 @@ def train(
   environment = tonic.environments.distribute(lambda: eval(_environment), parallel, sequential)
   test_environment = tonic.environments.distribute(lambda: eval(_environment))
 
+  #checkpoints
+
+  if checkpoint == 'none':
+    # Use no checkpoint, the agent is freshly created.
+    checkpoint_path = None
+    tonic.logger.log('Not loading any weights')
+  else:
+    checkpoint_path = os.path.join(path, 'checkpoints')
+    if not os.path.isdir(checkpoint_path):
+      tonic.logger.error(f'{checkpoint_path} is not a directory')
+      checkpoint_path = None
+
+    # List all the checkpoints.
+    checkpoint_ids = []
+    for file in os.listdir(checkpoint_path):
+      if file[:5] == 'step_':
+        checkpoint_id = file.split('.')[0]
+        checkpoint_ids.append(int(checkpoint_id[5:]))
+
+    if checkpoint_ids:
+      if checkpoint == 'last':
+        # Use the last checkpoint.
+        checkpoint_id = max(checkpoint_ids)
+        checkpoint_path = os.path.join(checkpoint_path, f'step_{checkpoint_id}')
+      elif checkpoint == 'first':
+        # Use the first checkpoint.
+        checkpoint_id = min(checkpoint_ids)
+        checkpoint_path = os.path.join(checkpoint_path, f'step_{checkpoint_id}')
+      else:
+        # Use the specified checkpoint.
+        checkpoint_id = int(checkpoint)
+        if checkpoint_id in checkpoint_ids:
+          checkpoint_path = os.path.join(checkpoint_path, f'step_{checkpoint_id}')
+        else:
+          tonic.logger.error(f'Checkpoint {checkpoint_id} not found in {checkpoint_path}')
+          checkpoint_path = None
+    else:
+      tonic.logger.error(f'No checkpoint found in {checkpoint_path}')
+      checkpoint_path = None
+
 
   # Build the agent.
   agent = eval(agent)
   agent.initialize(
     observation_space=test_environment.observation_space,
     action_space=test_environment.action_space, seed=seed)
+
+  # Load the weights of the agent form a checkpoint.
+  if checkpoint_path:
+    agent.load(checkpoint_path)
+    tonic.logger.log(f'Loaded weights from {checkpoint_path}')
 
   # Choose a name for the experiment.
   if hasattr(test_environment, 'name'):
@@ -1404,6 +1369,86 @@ fig=plt.gcf()
 fig.savefig('reward.png')
 plt.close('all')
 
+
+## Test in different viscosity
+
+def get_model_str(n_links=6):
+  return swimmer.get_model_and_assets(n_links)[0]
+
+type(get_model_str(6))
+
+swim_template="""@swimmer.SUITE.add()
+def swim%vlabel%(
+  n_links=6,
+  desired_speed=_SWIM_SPEED,
+  time_limit=swimmer._DEFAULT_TIME_LIMIT,
+  random=None,
+  environment_kwargs={},
+):
+  model_string_=bytes(str(get_model_str(6),encoding='utf-8').replace('density="3000"', 'density="3000" viscosity="%vval%"'),encoding='utf-8')
+  model_string, assets = swimmer.get_model_and_assets(n_links)
+  if model_string_:
+    model_string = model_string_
+  physics = swimmer.Physics.from_xml_string(model_string, assets=assets)
+  task = Swim(desired_speed=desired_speed, random=random)
+  return control.Environment(
+    physics,
+    task,
+    time_limit=time_limit,
+    control_timestep=swimmer._CONTROL_TIMESTEP,
+    **environment_kwargs,
+  )
+"""
+
+viscosities = [0.001,0.01,0.1,1]
+vfuntions=[]
+for v in viscosities:
+  vlabel=str(v).replace('.','d')
+  exec(swim_template.replace('%vlabel%',vlabel).replace('%vval%',str(v)))
+  vfuntions.append(vlabel)
+
+[print(eval(f'swim{v}')) for v in vfuntions]
+
+vlabel=str(2).replace('.','d')
+v=2
+print(swim_template.replace('%vlabel%',vlabel).replace('%vval%',str(v)))
+@swimmer.SUITE.add()
+def swim2(
+  n_links=6,
+  desired_speed=_SWIM_SPEED,
+  time_limit=swimmer._DEFAULT_TIME_LIMIT,
+  random=None,
+  environment_kwargs={},
+):
+  model_string_=bytes(str(get_model_str(6),encoding='utf-8').replace('density="3000"', 'density="3000" viscosity="2"'),encoding='utf-8')
+  model_string, assets = swimmer.get_model_and_assets(n_links)
+  if model_string_:
+    model_string = model_string_
+  physics = swimmer.Physics.from_xml_string(model_string, assets=assets)
+  task = Swim(desired_speed=desired_speed, random=random)
+  return control.Environment(
+    physics,
+    task,
+    time_limit=time_limit,
+    control_timestep=swimmer._CONTROL_TIMESTEP,
+    **environment_kwargs,
+  )
+
+def extract_weights(path):
+    checkpoint = torch.load(path)
+    pt_keys = list(checkpoint.keys())
+    pt_dict = {}
+    for key in pt_keys:
+        pt_dict[key] = np.array(checkpoint[key])
+    return pt_dict
+
+ref_viscosity=0.05
+ref_vlabel=str(ref_viscosity).replace('.','d')
+exec(swim_template.replace('%vlabel%',ref_vlabel).replace('%vval%',str(ref_viscosity)))
+
+print(eval(f'swim{ref_vlabel}'))
+
+
 if False:
   suitename='swimmer-swim3'
 
@@ -1414,3 +1459,72 @@ if False:
       x=''
     env=f'tonic.environments.ControlSuite(suitename,{x})'#"suite.load('swimmer', 'swim2')"
     play_model(f'data/local/experiments/tonic/swimmer-swim/{mod_}', environment=env,filename=f'{suitename}.mp4')
+
+
+## Q3 and Q4
+
+# Common step, training models directly in target viscosities
+
+
+for mod_ in ['ncap']:#,'mlp']:
+  for opt in ['ppo']:
+    for v in viscosities+[ref_viscosity]:
+      vlabel=str(v).replace('.','d')
+      name = f'model-{mod_}_opt-{opt}_v-{vlabel}'
+      steps='int(5e5)' # shouldnt these be the same for both models
+      save_steps='int(5e4)'
+      trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
+      if not os.path.exists(f'data/local/experiments/tonic/{name}'):
+        if 'mlp' in mod_ and 'ppo' in opt:
+          
+          train('import tonic.torch',
+                'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
+                f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
+                name=name,
+                trainer=trainer,
+                #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
+                )
+        elif 'ncap' in mod_ and 'ppo' in opt:
+          train('import tonic.torch',
+                # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
+                'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
+            f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+            name=name,
+            #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
+            trainer=trainer
+            )
+        play_model(f'data/local/experiments/tonic/swimmer-swim/{name}',filename=f'video.mp4')
+
+## Common step, retrain from reference viscosity
+
+for mod_ in ['ncap']:#,'mlp']:
+  for opt in ['ppo']:
+    for v in viscosities:
+      vlabel=str(v).replace('.','d')
+      name = f'model-{mod_}_opt-{opt}_v-{vlabel}'
+      steps='int(5e5)' # shouldnt these be the same for both models
+      save_steps='int(5e4)'
+      trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
+      checkpointpath = os.path.join('data', 'local', 'experiments', 'tonic', name)
+      newname=f'model-{mod_}_opt-{opt}_v-{ref_vlabel}_retrain'
+      if 'mlp' in mod_ and 'ppo' in opt:
+        
+        train('import tonic.torch',
+              'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
+              f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
+              name=newname,
+              trainer=trainer,
+              #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
+              checkpoint=checkpointpath
+              )
+      elif 'ncap' in mod_ and 'ppo' in opt:
+        train('import tonic.torch',
+              # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
+              'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
+          f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+          name=newname,
+          #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
+          trainer=trainer,
+          checkpoint=checkpointpath,
+          )
+        play_model(f'data/local/experiments/tonic/swimmer-swim/{name}',filename=f'video.mp4')
