@@ -1466,7 +1466,7 @@ if False:
 # Common step, training models directly in target viscosities
 
 
-for mod_ in ['ncap']:#,'mlp']:
+for mod_ in ['ncap','mlp']:
   for opt in ['ppo']:
     for v in viscosities+[ref_viscosity]:
       vlabel=str(v).replace('.','d')
@@ -1497,7 +1497,7 @@ for mod_ in ['ncap']:#,'mlp']:
 
 ## Common step, retrain from reference viscosity
 
-for mod_ in ['ncap']:#,'mlp']:
+for mod_ in ['ncap','mlp']:
   for opt in ['ppo']:
     for v in viscosities:
       vlabel=str(v).replace('.','d')
