@@ -129,6 +129,7 @@ First, we'll initialize a basic swimmer agent consisting of 6 links. Each agent 
 The environment is flexible, allowing for modifications to introduce additional tasks such as "swim only in the x-direction" or "move towards a ball."
 """
 
+#import dm_control.suite.swimmer as swimmer
 _SWIM_SPEED = 0.1
 
 @swimmer.SUITE.add()
@@ -335,7 +336,8 @@ def train(
   sequential = 1,
   seed = 0,
   checkpoint = 'none',
-
+ locals_=None,
+ globals_=None
 ):
   """
   Some additional parameters:
@@ -401,7 +403,7 @@ def train(
 
 
   # Build the agent.
-  agent = eval(agent)
+  agent = eval(agent, globals_, locals_)
   agent.initialize(
     observation_space=test_environment.observation_space,
     action_space=test_environment.action_space, seed=seed)
@@ -1465,67 +1467,108 @@ if False:
 
 # Common step, training models directly in target viscosities
 
+from joblib import Parallel, delayed
 
-for mod_ in ['ncap','mlp']:
-  for opt in ['ppo']:
-    for v in viscosities+[ref_viscosity]:
-      vlabel=str(v).replace('.','d')
-      name = f'model-{mod_}_opt-{opt}_v-{vlabel}'
-      steps='int(5e5)' # shouldnt these be the same for both models
-      save_steps='int(5e4)'
-      trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
-      if not os.path.exists(f'data/local/experiments/tonic/{name}'):
-        if 'mlp' in mod_ and 'ppo' in opt:
-          
-          train('import tonic.torch',
-                'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
-                f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
-                name=name,
-                trainer=trainer,
-                #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
-                )
-        elif 'ncap' in mod_ and 'ppo' in opt:
-          train('import tonic.torch',
-                # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
-                'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
-            f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+mod_strs = ['ncap','mlp']
+opt_strs = ['ppo']
+viscosities_ = viscosities+[ref_viscosity]
+
+import itertools
+
+
+comb=list(itertools.product(mod_strs,opt_strs,viscosities_))
+
+def loop(mod_,opt,v,swimmer=swimmer,get_model_str=get_model_str,ppo_swimmer_model=ppo_swimmer_model,ppo_mlp_model=ppo_mlp_model ,Swim=Swim,_SWIM_SPEED=_SWIM_SPEED,control=control,swim_template=swim_template,train=train,play_model=play_model):
+
+  def get_model_str(n_links=6):
+    return swimmer.get_model_and_assets(n_links)[0]
+
+  vlabel=str(v).replace('.','d')
+  #exec(swim_template.replace('%vlabel%',vlabel).replace('%vval%',str(v)),locals(),globals())
+
+  name = f'model-{mod_}_opt-{opt}_v-{vlabel}'
+  steps='int(5e5)' # shouldnt these be the same for both models
+  save_steps='int(5e4)'
+  trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
+  if not os.path.exists(f'data/local/experiments/tonic/{name}'):
+    if 'mlp' in mod_ and 'ppo' in opt:
+      
+      train('import tonic.torch',
+            'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
+            f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
             name=name,
-            #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
-            trainer=trainer
-            )
-        play_model(f'data/local/experiments/tonic/swimmer-swim/{name}',filename=f'video.mp4')
+            trainer=trainer,
+            #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
+      locals_=locals(),
+      globals_=globals()
 
+            )
+    elif 'ncap' in mod_ and 'ppo' in opt:
+      train('import tonic.torch',
+            # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
+            'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
+        f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+        name=name,
+        #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
+        trainer=trainer,
+      locals_=locals(),
+      globals_=globals()
+
+        )
+    play_model(f'data/local/experiments/tonic/swimmer-swim{vlabel}/{name}',filename=f'video.mp4')
+  return True
+
+
+#Parallel(n_jobs=8)(delayed(loop)(mod_,opt_,v) for mod_,opt_,v in comb)
+
+for mod_,opt_,v in comb:
+  loop(mod_,opt_,v)
 ## Common step, retrain from reference viscosity
 
-for mod_ in ['ncap','mlp']:
-  for opt in ['ppo']:
-    for v in viscosities:
-      vlabel=str(v).replace('.','d')
-      steps='int(5e5)' # shouldnt these be the same for both models
-      save_steps='int(5e4)'
-      trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
-      newname=f'model-{mod_}_opt-{opt}_v-{vlabel}_retrain-{ref_vlabel}'
-      name = f'model-{mod_}_opt-{opt}_v-{ref_vlabel}'
-      checkpointpath = os.path.join('data', 'local', 'experiments', 'tonic', name)
+comb=list(itertools.product(mod_strs,opt_strs,viscosities))
+def loop(mod_,opt,v,swimmer=swimmer,get_model_str=get_model_str,Swim=Swim,_SWIM_SPEED=_SWIM_SPEED,control=control,swim_template=swim_template,train=train,play_model=play_model):
 
-      if 'mlp' in mod_ and 'ppo' in opt:
-        
-        train('import tonic.torch',
-              'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
-              f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
-              name=newname,
-              trainer=trainer,
-              #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
-              checkpoint=checkpointpath
-              )
-      elif 'ncap' in mod_ and 'ppo' in opt:
-        train('import tonic.torch',
-              # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
-              'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
-          f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+  def get_model_str(n_links=6):
+    return swimmer.get_model_and_assets(n_links)[0]
+
+  vlabel=str(v).replace('.','d')
+  #exec(swim_template.replace('%vlabel%',vlabel).replace('%vval%',str(v)),locals(),globals())
+
+  steps='int(5e5)' # shouldnt these be the same for both models
+  save_steps='int(5e4)'
+  trainer = f'tonic.Trainer(steps={steps},save_steps={save_steps})'
+  newname=f'model-{mod_}_opt-{opt}_v-{vlabel}_retrain-{ref_vlabel}'
+  name = f'model-{mod_}_opt-{opt}_v-{ref_vlabel}'
+  checkpointpath = os.path.join('data', 'local', 'experiments', 'tonic', name)
+
+  if 'mlp' in mod_ and 'ppo' in opt:
+    
+    train('import tonic.torch',
+          'tonic.torch.agents.PPO(model=ppo_mlp_model(actor_sizes=(256, 256), critic_sizes=(256,256)))',
+          f'tonic.environments.ControlSuite("swimmer-swim{vlabel}")',
           name=newname,
-          #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
           trainer=trainer,
+          #trainer = 'tonic.Trainer(steps=int(5e5),save_steps=int(1e5))',
           checkpoint=checkpointpath,
+          locals_=locals(),
+          globals_=globals()
+
           )
-        play_model(f'data/local/experiments/tonic/swimmer-swim/{newname}',filename=f'video.mp4')
+  elif 'ncap' in mod_ and 'ppo' in opt:
+    train('import tonic.torch',
+          # 'tonic.torch.agents.D4PG(model=d4pg_swimmer_model(n_joints=5,critic_sizes=(128,128)))',
+          'tonic.torch.agents.PPO(model=ppo_swimmer_model(n_joints=5,critic_sizes=(256,256)))',
+      f'tonic.environments.ControlSuite("swimmer-swim{vlabel}",time_feature=True)',
+      name=newname,
+      #trainer = 'tonic.Trainer(steps=int(1e5),save_steps=int(5e4))'
+      trainer=trainer,
+      checkpoint=checkpointpath,
+      locals_=locals(),
+      globals_=globals()
+      )
+    play_model(f'data/local/experiments/tonic/swimmer-swim{vlabel}/{newname}',filename=f'video.mp4')
+
+#Parallel(n_jobs=8)(delayed(loop)(mod_,opt_,v) for mod_,opt_,v in comb)
+
+for mod_,opt_,v in comb:
+  loop(mod_,opt_,v)
