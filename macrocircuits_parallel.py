@@ -146,7 +146,7 @@ The environment is flexible, allowing for modifications to introduce additional 
 """
 
 #import dm_control.suite.swimmer as swimmer
-_SWIM_SPEED = 0.1
+_SWIM_SPEED = 1
 
 @swimmer.SUITE.add()
 def swim(
@@ -195,7 +195,8 @@ class Swim(swimmer.Swimmer):
     forward_velocity = -physics.named.data.sensordata['head_vel'][1]
     return rewards.tolerance(
       forward_velocity,
-      bounds=(self._desired_speed, float('inf')),
+      bounds=(self._desired_speed-0.2, self._desired_speed+0.2),
+      #bounds=(self._desired_speed, float('inf')),
       margin=self._desired_speed,
       value_at_margin=0.,
       sigmoid='linear',
