@@ -6,6 +6,7 @@ pattern = os.path.join(datapath, '**','video_*.mp4')
 videos= glob.glob(pattern, recursive=True)
 
 videos = [x for x in videos if 'video.mp4' not in x]
+videos = [x for x in videos if 'ignore' not in x]
 
 
 
